@@ -12,7 +12,7 @@ RUN pip install --no-cache-dir -r requirements_minimal.txt
 COPY app_minimal.py .
 
 # 暴露端口
-EXPOSE 5000
+EXPOSE $PORT
 
 # 啟動命令
-CMD ["python", "app_minimal.py"]
+CMD python app_minimal.py
