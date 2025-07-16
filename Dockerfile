@@ -2,20 +2,14 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# 安裝系統依賴
-RUN apt-get update && apt-get install -y \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+# 複製最小需求檔案
+COPY requirements_minimal.txt .
 
-# 升級 pip 並複製需求檔案
-COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip
-
-# 安裝 Python 依賴
-RUN pip install --no-cache-dir --root-user-action=ignore -r requirements.txt
+# 安裝最小依賴
+RUN pip install --no-cache-dir -r requirements_minimal.txt
 
 # 複製應用程式
-COPY . .
+COPY app_minimal.py .
 
 # 暴露端口
 EXPOSE 5000
