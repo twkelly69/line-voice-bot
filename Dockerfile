@@ -21,4 +21,4 @@ COPY . .
 EXPOSE 5000
 
 # 啟動命令
-CMD ["python", "app.py"]
+CMD ["python", "app_minimal.py"]
