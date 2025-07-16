@@ -26,15 +26,25 @@ SCOPE = ['https://spreadsheets.google.com/feeds',
 
 def setup_google_sheets():
     try:
-        # 嘗試從環境變數讀取 JSON 內容
-        credentials_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
-        if credentials_json:
+        # 嘗試從環境變數讀取 Base64 編碼的憑證
+        credentials_base64 = os.environ.get('GOOGLE_CREDENTIALS_BASE64')
+        if credentials_base64:
+            import base64
             import json
+            # 解碼 Base64 並解析 JSON
+            credentials_json = base64.b64decode(credentials_base64).decode('utf-8')
             credentials_dict = json.loads(credentials_json)
             creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, SCOPE)
         else:
-            # 本地開發時從檔案讀取
-            creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', SCOPE)
+            # 嘗試從環境變數讀取 JSON 內容
+            credentials_json = os.environ.get('GOOGLE_CREDENTIALS_JSON')
+            if credentials_json:
+                import json
+                credentials_dict = json.loads(credentials_json)
+                creds = ServiceAccountCredentials.from_json_keyfile_dict(credentials_dict, SCOPE)
+            else:
+                # 本地開發時從檔案讀取
+                creds = ServiceAccountCredentials.from_json_keyfile_name('credentials.json', SCOPE)
         
         client = gspread.authorize(creds)
         sheet = client.open_by_key(os.environ.get('GOOGLE_SHEET_ID')).sheet1
