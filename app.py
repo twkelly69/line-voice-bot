@@ -53,22 +53,35 @@ def setup_google_sheets():
         print(f"Google Sheets 設定錯誤: {e}")
         return None
 
-def speech_to_text(audio_url):
+def speech_to_text(message_content):
     try:
-        # 下載音訊檔案
-        response = requests.get(audio_url, headers={'Authorization': f'Bearer {os.environ.get("LINE_CHANNEL_ACCESS_TOKEN")}'})
+        # 使用 pydub 處理音訊
+        from pydub import AudioSegment
+        import io
         
+        # 將音訊內容轉換為音訊檔案
+        audio_data = message_content.content
+        
+        # 暫存音訊檔案
         with tempfile.NamedTemporaryFile(suffix='.m4a', delete=False) as temp_file:
-            temp_file.write(response.content)
+            temp_file.write(audio_data)
             temp_file_path = temp_file.name
+        
+        # 轉換為 wav 格式
+        audio = AudioSegment.from_file(temp_file_path)
+        wav_path = temp_file_path.replace('.m4a', '.wav')
+        audio.export(wav_path, format='wav')
         
         # 語音轉文字
         r = sr.Recognizer()
-        with sr.AudioFile(temp_file_path) as source:
-            audio = r.record(source)
-            text = r.recognize_google(audio, language='zh-TW')
+        with sr.AudioFile(wav_path) as source:
+            audio_data = r.record(source)
+            text = r.recognize_google(audio_data, language='zh-TW')
         
+        # 清理暫存檔案
         os.unlink(temp_file_path)
+        os.unlink(wav_path)
+        
         return text
     except Exception as e:
         print(f"語音轉文字錯誤: {e}")
@@ -82,7 +95,11 @@ def callback():
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        print("Invalid signature")
         abort(400)
+    except Exception as e:
+        print(f"處理 webhook 錯誤: {e}")
+        abort(500)
     
     return 'OK'
 
@@ -91,64 +108,80 @@ def handle_text_message(event):
     user_id = event.source.user_id
     user_message = event.message.text
     
-    if user_message == '/save':
-        # 儲存到 Google Sheets
-        if user_id in user_conversations:
-            sheet = setup_google_sheets()
-            if sheet:
-                try:
-                    conversation = user_conversations[user_id]
-                    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    sheet.append_row([timestamp, user_id, conversation])
-                    
-                    # 清空對話記錄
-                    user_conversations[user_id] = ""
-                    
-                    reply_message = "✅ 對話記錄已儲存到 Google Sheets！"
-                except Exception as e:
-                    reply_message = f"❌ 儲存失敗: {str(e)}"
+    try:
+        if user_message == '/save':
+            # 儲存到 Google Sheets
+            if user_id in user_conversations:
+                sheet = setup_google_sheets()
+                if sheet:
+                    try:
+                        conversation = user_conversations[user_id]
+                        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                        sheet.append_row([timestamp, user_id, conversation])
+                        
+                        # 清空對話記錄
+                        user_conversations[user_id] = ""
+                        
+                        reply_message = "✅ 對話記錄已儲存到 Google Sheets！"
+                    except Exception as e:
+                        print(f"儲存到 Google Sheets 錯誤: {e}")
+                        reply_message = f"❌ 儲存失敗: {str(e)}"
+                else:
+                    reply_message = "❌ Google Sheets 連接失敗"
             else:
-                reply_message = "❌ Google Sheets 連接失敗"
+                reply_message = "📝 目前沒有對話記錄"
         else:
-            reply_message = "📝 目前沒有對話記錄"
-    else:
-        # 累積對話記錄
-        if user_id not in user_conversations:
-            user_conversations[user_id] = ""
+            # 累積對話記錄
+            if user_id not in user_conversations:
+                user_conversations[user_id] = ""
+            
+            user_conversations[user_id] += user_message + "\n"
+            reply_message = f"📝 目前對話記錄:\n{user_conversations[user_id]}"
         
-        user_conversations[user_id] += user_message + "\n"
-        reply_message = f"📝 目前對話記錄:\n{user_conversations[user_id]}"
-    
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_message)
-    )
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_message)
+        )
+        
+    except Exception as e:
+        print(f"處理文字訊息錯誤: {e}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="❌ 訊息處理失敗，請重試")
+        )
 
 @handler.add(MessageEvent, message=AudioMessage)
 def handle_audio_message(event):
     user_id = event.source.user_id
     
-    # 取得音訊檔案 URL
-    message_content = line_bot_api.get_message_content(event.message.id)
-    audio_url = f"https://api-data.line.me/v2/bot/message/{event.message.id}/content"
-    
-    # 語音轉文字
-    text = speech_to_text(audio_url)
-    
-    if text:
-        # 累積對話記錄
-        if user_id not in user_conversations:
-            user_conversations[user_id] = ""
+    try:
+        # 取得音訊檔案內容
+        message_content = line_bot_api.get_message_content(event.message.id)
         
-        user_conversations[user_id] += text + "\n"
-        reply_message = f"🎤 語音轉文字: {text}\n\n📝 目前對話記錄:\n{user_conversations[user_id]}"
-    else:
-        reply_message = "❌ 語音轉文字失敗，請重試"
-    
-    line_bot_api.reply_message(
-        event.reply_token,
-        TextSendMessage(text=reply_message)
-    )
+        # 語音轉文字
+        text = speech_to_text(message_content)
+        
+        if text:
+            # 累積對話記錄
+            if user_id not in user_conversations:
+                user_conversations[user_id] = ""
+            
+            user_conversations[user_id] += text + "\n"
+            reply_message = f"🎤 語音轉文字: {text}\n\n📝 目前對話記錄:\n{user_conversations[user_id]}"
+        else:
+            reply_message = "❌ 語音轉文字失敗，請重試"
+        
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text=reply_message)
+        )
+        
+    except Exception as e:
+        print(f"處理語音訊息錯誤: {e}")
+        line_bot_api.reply_message(
+            event.reply_token,
+            TextSendMessage(text="❌ 語音處理失敗，請重試")
+        )
 
 if __name__ == "__main__":
     port = int(os.environ.get('PORT', 5000))
